@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: msb-api
+  namespace: msb
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: msb.k3s.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: msb-api
+                port:
+                  name: http
