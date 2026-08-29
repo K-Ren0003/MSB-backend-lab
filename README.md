@@ -41,19 +41,36 @@ It does not implement real-money gambling, payments, or odds.
 - Verified PostgreSQL persistence after PostgreSQL container recreation
 - Diagnosed an invalid database hostname and incorrect API port mapping
 
+### Day 4 — Kubernetes/K3s and Traefik: complete
+
+- API image imported into the single-node K3s container runtime
+- Three FastAPI replicas managed by a Kubernetes Deployment
+- ClusterIP Service selecting API Pods through `app: msb-api` labels
+- Traefik Ingress routing `msb.k3s.test` to the API Service
+- PostgreSQL and MongoDB StatefulSets with persistent volumes
+- ConfigMap for non-sensitive runtime configuration and Kubernetes Secret for credentials
+- One-off Job to initialise PostgreSQL tables before application use
+- Verified an end-to-end tip request, including PostgreSQL persistence and a MongoDB `tip.created` event
+- Diagnosed and restored invalid images, Service selectors, target ports, and Ingress backends
+
 ## Current Architecture
 
 ```text
 Client
   |
-  | HTTP / REST
+  | HTTP / REST, Host: msb.k3s.test
   v
-FastAPI
+Traefik LoadBalancer / Ingress
+  |
+  v
+msb-api ClusterIP Service
+  |--------------------------|--------------------------|
+  v                          v                          v
+FastAPI Pod 1              FastAPI Pod 2              FastAPI Pod 3
   |--------------------------|
   v                          v
-PostgreSQL                MongoDB
-teams, users,             activity_events
-events, tips              audit documents
+PostgreSQL StatefulSet     MongoDB StatefulSet
+teams, users, events, tips activity_events
 ```
 
 PostgreSQL stores structured transactional records whose relationships need
@@ -70,6 +87,8 @@ than duplicating the relational data.
 - MongoDB and PyMongo
 - Pytest, HTTPX, and SQLite for isolated tests
 - Docker and Docker Compose
+- Kubernetes/K3s
+- Traefik
 - Git
 
 ## Project Structure
@@ -92,6 +111,16 @@ MSB-backend-lab/
 ├── .dockerignore
 ├── compose.yaml
 ├── Dockerfile
+├── k8s/
+│   ├── api-configmap.yaml
+│   ├── api-deployment.yaml
+│   ├── api-ingress.yaml
+│   ├── api-service.yaml
+│   ├── init-db-job.yaml
+│   ├── mongo.yaml
+│   ├── msb-runtime-secret.example.yaml
+│   ├── namespace.yaml
+│   └── postgres.yaml
 ├── requirements.txt
 └── README.md
 ```
@@ -209,6 +238,93 @@ both named volumes and all containerized database data.
   connection reset. Uvicorn listens on container port `8000`, so the correct
   mapping is `8000:8000`.
 
+## Kubernetes/K3s Deployment (Ubuntu)
+
+Day 4 runs a separate K3s environment on the Ubuntu server. The existing
+Docker Compose stack is left intact for Docker development; it has separate
+database data from the K3s StatefulSets.
+
+### 1. Build and import the API image
+
+K3s uses containerd rather than Docker's local image store, so the locally
+built API image must be imported before a Pod can run it:
+
+```bash
+docker build -t msb-api:day4 .
+docker save msb-api:day4 | sudo k3s ctr images import -
+sudo k3s ctr images ls | grep msb-api
+```
+
+The API Deployment uses `imagePullPolicy: Never` so K3s uses that imported
+image rather than attempting to pull it from a registry.
+
+### 2. Create the namespace and runtime credentials
+
+Real credentials are deliberately not committed. On the Ubuntu server, create
+an ignored `.k8s-runtime.env` file using
+`k8s/msb-runtime-secret.example.yaml` as the shape, then create the Secret:
+
+```bash
+sudo k3s kubectl apply -f k8s/namespace.yaml
+sudo k3s kubectl create secret generic msb-runtime -n msb \
+  --from-env-file=.k8s-runtime.env
+```
+
+The file contains PostgreSQL and MongoDB credentials plus the API connection
+URLs. Use URL-safe passwords and keep this file local to the server.
+
+### 3. Deploy databases, initialise tables, and deploy the API
+
+```bash
+sudo k3s kubectl apply -f k8s/api-configmap.yaml
+sudo k3s kubectl apply -f k8s/postgres.yaml
+sudo k3s kubectl apply -f k8s/mongo.yaml
+
+sudo k3s kubectl rollout status statefulset/postgres -n msb
+sudo k3s kubectl rollout status statefulset/mongo -n msb
+
+sudo k3s kubectl apply -f k8s/init-db-job.yaml
+sudo k3s kubectl wait --for=condition=complete job/init-db -n msb
+
+sudo k3s kubectl apply -f k8s/api-deployment.yaml
+sudo k3s kubectl apply -f k8s/api-service.yaml
+sudo k3s kubectl apply -f k8s/api-ingress.yaml
+sudo k3s kubectl rollout status deployment/msb-api -n msb
+```
+
+The `init-db` Job creates missing PostgreSQL tables once. PostgreSQL and
+MongoDB each use a `ReadWriteOnce` persistent volume claim, so their K3s data
+survives a Pod replacement.
+
+### 4. Verify routing
+
+Traefik is exposed by K3s at the Ubuntu server's LAN address. A host-header
+request proves the whole route without requiring local DNS setup:
+
+```bash
+sudo k3s kubectl get pods -n msb
+sudo k3s kubectl get endpointslice -n msb \
+  -l kubernetes.io/service-name=msb-api
+curl -i -H 'Host: msb.k3s.test' http://192.168.4.26/health
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+### Kubernetes troubleshooting completed
+
+- An invalid locally unavailable image produced `ErrImageNeverPull`.
+- A wrong Service selector left the Service with no endpoints and Traefik
+  returned HTTP `503`.
+- A wrong Service `targetPort` left endpoints present but forwarded to no
+  listening application port, producing HTTP `502`.
+- A broken Ingress backend Service reference produced HTTP `404`.
+- Job logs identified a PostgreSQL password mismatch; correcting the Secret's
+  `DATABASE_URL` allowed the table-initialisation Job to succeed.
+
 ## API Endpoints
 
 ```text
@@ -322,9 +438,7 @@ Before moving on, be able to explain:
 
 ## Next Stage
 
-Day 4 will deploy the API to Kubernetes/K3s, starting with a Deployment,
-ClusterIP Service, and Traefik Ingress before introducing replicas,
-ConfigMaps, and Secrets.
+Day 5 adds Loki and Grafana for centralised logging and observability.
 
 This project represents hands-on educational experience, not commercial or
 production experience.
