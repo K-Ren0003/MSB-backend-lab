@@ -1,5 +1,6 @@
 .venv/
 .env
+.k8s-runtime.env
 .pytest_cache/
 __pycache__/
 *.pyc

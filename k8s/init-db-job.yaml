@@ -1,20 +1,15 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: msb-api
+  name: init-db
   namespace: msb
 spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: msb-api
+  backoffLimit: 12
   template:
-    metadata:
-      labels:
-        app: msb-api
     spec:
+      restartPolicy: OnFailure
       containers:
-        - name: api
+        - name: init-db
           image: docker.io/library/msb-api:day4
           imagePullPolicy: Never
           envFrom:
@@ -22,6 +17,7 @@ spec:
                 name: msb-api-config
             - secretRef:
                 name: msb-runtime
-          ports:
-            - name: http
-              containerPort: 8000
+          command:
+            - python
+            - -m
+            - api.app.init_db
