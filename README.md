@@ -1,314 +1,269 @@
 # MSB Backend Lab
 
-A practical backend engineering learning project built to develop hands-on experience with modern backend development, APIs, databases, containers, Kubernetes, observability, event-driven architecture, and microservices.
+An educational sports-platform backend built to develop practical experience
+with APIs, databases, containers, Kubernetes, observability, event-driven
+architecture, and microservices.
 
-The application is a small sports platform API supporting teams, sporting events, users, and tips/predictions.
+The application supports teams, sporting events, users, and tips/predictions.
+It does not implement real-money gambling, payments, or odds.
 
 ## Current Progress
 
-### Day 1 — Python, FastAPI and REST
+### Day 1 — Python, FastAPI, and REST: complete
 
-The first stage of the project implements a REST API using Python and FastAPI.
-
-Current functionality includes:
-
-- Health check endpoint
-- Create and retrieve teams
-- Create and retrieve sporting events
-- Update sporting events
-- Create and retrieve users
-- Create and retrieve tips
-- Retrieve tips belonging to a specific user
+- FastAPI application and Swagger/OpenAPI documentation
+- Health, team, event, user, and tip endpoints
 - Pydantic request validation
-- HTTP status codes
-- 404 error handling
-- Automatic Swagger/OpenAPI documentation
-- Automated API testing with pytest
+- Appropriate success, not-found, and validation status codes
+- Automated API tests
 
-Data is currently stored in memory. Persistent storage using PostgreSQL and MongoDB will be introduced later in the project.
+### Day 2 — PostgreSQL, SQL, and MongoDB: complete
 
-## Tech Stack
+- PostgreSQL as the transactional datastore
+- SQLAlchemy models, foreign keys, and ORM relationships
+- Request-scoped database sessions
+- Repeatable table-initialization command
+- MongoDB `activity_events` collection for audit-style documents
+- A `tip.created` MongoDB document after a tip is persisted
+- Activity-event retrieval for debugging and demonstration
+- Environment-based database configuration
+- Isolated tests that do not use the development databases
+- Manual SQL and JOIN exercises
 
-Current:
+Day 3 (Docker and Docker Compose) is the next stage.
 
-- Python
-- FastAPI
+## Current Architecture
+
+```text
+Client
+  |
+  | HTTP / REST
+  v
+FastAPI
+  |--------------------------|
+  v                          v
+PostgreSQL                MongoDB
+teams, users,             activity_events
+events, tips              audit documents
+```
+
+PostgreSQL stores structured transactional records whose relationships need
+foreign-key integrity. MongoDB stores flexible activity/audit documents rather
+than duplicating the relational data.
+
+## Technology Stack
+
+- Python 3.14
+- FastAPI and Uvicorn
 - Pydantic
-- Uvicorn
-- Pytest
-- HTTPX / FastAPI TestClient
-- Git
-
-Planned later in the project:
-
 - PostgreSQL
-- MongoDB
-- Docker
-- Docker Compose
-- Kubernetes / K3s
-- Traefik
-- Grafana
-- Loki
-- Apache Kafka
-- Go
-- gRPC
-- Protocol Buffers
-- React
+- SQLAlchemy and Psycopg
+- MongoDB and PyMongo
+- Pytest, HTTPX, and SQLite for isolated tests
+- Git
 
 ## Project Structure
 
 ```text
 MSB-backend-lab/
 ├── api/
-│   ├── __init__.py
 │   ├── app/
-│   │   ├── __init__.py
-│   │   └── main.py
+│   │   ├── db.py          # PostgreSQL engine and request sessions
+│   │   ├── init_db.py     # Repeatable table creation
+│   │   ├── main.py        # FastAPI schemas and routes
+│   │   ├── models.py      # SQLAlchemy models and relationships
+│   │   └── mongo.py       # MongoDB configuration and collection
 │   └── tests/
-│       └── test_healthy.py
-├── .gitignore
-├── README.md
-└── .venv/
+│       ├── conftest.py    # Isolated database and Mongo test fixtures
+│       └── test_api.py
+├── sql/
+│   └── day2_queries.sql   # Manual SQL and JOIN practice
+├── .env.example
+├── requirements.txt
+└── README.md
 ```
 
-The project structure will expand as databases, containers, Kubernetes resources, messaging, observability, and additional services are introduced.
+## Local Setup
 
-## Running Locally
-
-### 1. Activate the virtual environment
-
-From the project root:
+### 1. Create and activate a virtual environment
 
 ```bash
+python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-### 2. Start the API
+### 2. Start PostgreSQL and MongoDB
+
+Both services must be reachable locally. Create the PostgreSQL database if it
+does not already exist:
+
+```bash
+createdb msb_backend_lab
+```
+
+The MongoDB collection is created automatically when the first activity
+document is inserted.
+
+### 3. Configure environment variables
+
+The defaults in `.env.example` match the original local development setup.
+Copy and adjust them for your machine:
+
+```bash
+cp .env.example .env
+set -a
+source .env
+set +a
+```
+
+Configuration values:
+
+- `DATABASE_URL`: SQLAlchemy PostgreSQL connection URL
+- `MONGO_URL`: MongoDB server URL
+- `MONGO_DATABASE`: MongoDB database name
+
+The `.env` file is intentionally not committed. Do not put real credentials in
+Git.
+
+### 4. Create the PostgreSQL tables
+
+```bash
+python -m api.app.init_db
+```
+
+This uses the SQLAlchemy model metadata to create missing tables. It does not
+delete or replace existing tables or data. A migration tool such as Alembic can
+be introduced when the schema begins changing frequently.
+
+### 5. Start the API
 
 ```bash
 uvicorn api.app.main:app --reload
 ```
 
-The API will be available at:
-
-```text
-http://127.0.0.1:8000
-```
-
-## Swagger API Documentation
-
-FastAPI automatically generates interactive API documentation.
-
 Open:
 
-```text
-http://127.0.0.1:8000/docs
-```
-
-Swagger can be used to inspect endpoints, submit requests, and inspect response bodies and HTTP status codes.
+- API: `http://127.0.0.1:8000`
+- Swagger: `http://127.0.0.1:8000/docs`
+- ReDoc: `http://127.0.0.1:8000/redoc`
 
 ## API Endpoints
 
-### Health
-
 ```text
-GET /health
-```
+GET  /health
 
-Returns the health status of the API.
-
-Example response:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-### Teams
-
-```text
 GET  /teams
 GET  /teams/{team_id}
 POST /teams
-```
 
-Example team creation request:
-
-```json
-{
-  "name": "North Queensland Cowboys",
-  "code": "NQL"
-}
-```
-
-### Events
-
-```text
 GET  /events
 GET  /events/{event_id}
 POST /events
 PUT  /events/{event_id}
-```
 
-Example event:
-
-```json
-{
-  "home_team_id": 1,
-  "away_team_id": 2,
-  "starts_at": "2026-08-30T18:00:00",
-  "status": "scheduled"
-}
-```
-
-Events currently support statuses such as:
-
-```text
-scheduled
-live
-completed
-cancelled
-```
-
-### Users
-
-```text
-POST /users
+GET  /users
 GET  /users/{user_id}
-```
+POST /users
 
-Example user:
-
-```json
-{
-  "display_name": "Kaden",
-  "email": "kaden@example.com"
-}
-```
-
-### Tips
-
-```text
-POST /tips
 GET  /tips/{tip_id}
 GET  /users/{user_id}/tips
+POST /tips
+
+GET  /activity-events
 ```
 
-Example tip:
+Creating a tip performs two storage operations:
+
+1. The tip is committed to PostgreSQL.
+2. A `tip.created` activity document is written to MongoDB.
+
+Example MongoDB document:
 
 ```json
 {
+  "event_type": "tip.created",
   "user_id": 1,
+  "tip_id": 1,
   "event_id": 1,
-  "predicted_winner_team_id": 1
+  "metadata": {
+    "source": "api"
+  },
+  "created_at": "2026-08-29T00:00:00Z"
 }
 ```
-
-## Validation and Error Handling
-
-Incoming request bodies are validated using Pydantic models.
-
-For example, if a required field is missing from a request, FastAPI rejects the request with a validation error.
-
-Example:
-
-```text
-422 Unprocessable Content
-```
-
-Requests for resources that do not exist return:
-
-```text
-404 Not Found
-```
-
-For example:
-
-```json
-{
-  "detail": "Event not found"
-}
-```
-
-## HTTP Status Codes Used
-
-The API currently demonstrates:
-
-- `200 OK` — successful request
-- `201 Created` — resource successfully created
-- `404 Not Found` — requested resource does not exist
-- `422 Unprocessable Content` — request failed validation
-- `500 Internal Server Error` — unexpected backend application failure
 
 ## Testing
 
-Automated API tests are written using pytest and FastAPI's test client.
-
-Run the test suite from the project root:
+Run the suite from the repository root:
 
 ```bash
 python -m pytest -v
 ```
 
-Current tests cover:
+Tests use an isolated in-memory SQLite database and a fake activity collection.
+Every test starts with empty tables, creates its own prerequisites, and leaves
+the local PostgreSQL and MongoDB databases unchanged.
 
-- Health endpoint
-- Event creation
-- Event retrieval
-- Invalid event retrieval
-- Tip creation
+Current coverage includes:
 
-Current Day 1 test result:
+- Health response
+- Event creation and retrieval through separate database sessions
+- Missing-resource handling
+- Pydantic status validation
+- Relational tip creation
+- MongoDB activity-document creation and retrieval
+- Query-parameter validation
 
-```text
-5 passed
+Current result: **6 passed**.
+
+## Manual SQL Practice
+
+The Day 2 queries include filters, joins, aggregation, and a rolled-back write
+transaction:
+
+```bash
+psql msb_backend_lab -f sql/day2_queries.sql
 ```
 
-## Day 1 Learning Outcomes
+The final `UPDATE` and `DELETE` are wrapped in a transaction followed by
+`ROLLBACK`, allowing write practice without retaining those changes.
 
-Day 1 introduced practical experience with:
+## Day 2 Troubleshooting Exercise
 
-- REST APIs
-- HTTP requests and responses
-- GET, POST and PUT methods
-- API endpoints
-- Path parameters
-- JSON request and response bodies
-- HTTP status codes
-- FastAPI
-- Pydantic models
-- Request validation
-- Error handling
-- Swagger/OpenAPI
-- Basic automated API testing
-- Debugging Python backend errors
+To observe a dependency failure without editing saved configuration, run the
+initializer once with an intentionally invalid hostname:
 
-## Current Data Storage
+```bash
+DATABASE_URL='postgresql+psycopg://kaden@wrong-host/msb_backend_lab?connect_timeout=3' \
+python -m api.app.init_db
+```
 
-The application currently stores data in Python lists while the initial API behaviour is being developed.
+Inspect the hostname and connection error, then run the normal initializer
+again. This demonstrates that the API depends on correct runtime configuration.
 
-This means data is lost whenever the application process restarts.
+## Day 2 Learning Checkpoint
 
-Persistent storage will be introduced using PostgreSQL and MongoDB in the next stage of the project.
+Before moving on, be able to explain:
 
-## Future Development
+- A primary key identifies a row; a foreign key connects rows across tables.
+- A transaction groups database changes into one commit or rollback boundary.
+- An ORM maps Python objects to relational tables but does not remove the need
+  to understand SQL.
+- A JOIN combines related rows; the included practice query joins tips, users,
+  events, and teams.
+- PostgreSQL is appropriate for the core data because integrity and structured
+  relationships matter.
+- MongoDB is appropriate for the activity records because documents can carry
+  flexible event metadata and are mainly retrieved for auditing/debugging.
+- Persistence means data remains after an API process restarts because it lives
+  in an external database rather than a Python list.
 
-Planned stages of the project include:
+## Next Stage
 
-1. PostgreSQL and MongoDB persistence
-2. Docker and Docker Compose
-3. Kubernetes/K3s deployment
-4. Traefik Ingress and replicated API Pods
-5. Centralised logging using Loki and Grafana
-6. Kafka event-driven communication
-7. Go worker service
-8. gRPC and Protocol Buffers
-9. Small React frontend exposure
-10. Final architecture, troubleshooting, and interview documentation
+Day 3 will package the API and its dependencies with Docker and Docker Compose,
+including service-name networking, environment variables, persistent volumes,
+and health checks.
 
-## Project Goal
-
-The goal of this project is not to represent commercial experience.
-
-It is designed to provide genuine hands-on project experience with backend engineering technologies and to develop the ability to explain how the components work, communicate, fail, and are troubleshot.
+This project represents hands-on educational experience, not commercial or
+production experience.

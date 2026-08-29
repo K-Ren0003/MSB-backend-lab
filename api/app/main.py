@@ -1,162 +1,200 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from datetime import datetime, timezone
+from typing import Annotated, Literal
 
-app = FastAPI()
+from fastapi import Depends, FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
+from pymongo.collection import Collection
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-class UserCreate(BaseModel):
-    display_name: str
-    email: str
+from api.app.db import get_db
+from api.app.models import Event, Team, Tip, User
+from api.app.mongo import get_activity_collection
 
-users= []
+app = FastAPI(title="MSB Backend Lab API")
+
+DatabaseSession = Annotated[Session, Depends(get_db)]
+ActivityCollection = Annotated[Collection, Depends(get_activity_collection)]
+
 
 class TeamCreate(BaseModel):
-    name: str
-    code: str
+    name: str = Field(min_length=1, max_length=100)
+    code: str = Field(min_length=2, max_length=10)
+
 
 class EventCreate(BaseModel):
-    home_team_id: int
-    away_team_id: int
-    starts_at: str
-    status: str
+    home_team_id: int = Field(gt=0)
+    away_team_id: int = Field(gt=0)
+    starts_at: datetime
+    status: Literal["scheduled", "live", "completed", "cancelled"]
 
-events = []
+
+class UserCreate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=3, max_length=255)
+
 
 class TipCreate(BaseModel):
-    user_id: int
-    event_id: int
-    predicted_winner_team_id: int
+    user_id: int = Field(gt=0)
+    event_id: int = Field(gt=0)
+    predicted_winner_team_id: int = Field(gt=0)
 
-tips = []
 
 @app.get("/health")
 def health():
-    return{"status": "ok"}
+    return {"status": "ok"}
 
-teams = [ 
-    {"id": 1, "name": "Brisbane Broncos", "code": "BRI"},
-    {"id": 2, "name": "Melbourne Storm", "code": "MEL"},
-]
 
-@app.get("/teams") #get all teams
-def get_teams():
-    return teams
+@app.get("/teams")
+def get_teams(db: DatabaseSession):
+    return db.scalars(select(Team)).all()
+
 
 @app.get("/teams/{team_id}")
-def get_teams(team_id: int):
-    for team in teams:
-        if team["id"] == team_id:
-            return team
-        
-    raise HTTPException(status_code=404, detail="Team not found")
+def get_team(team_id: int, db: DatabaseSession):
+    team = db.get(Team, team_id)
+
+    if team is None:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    return team
+
 
 @app.post("/teams", status_code=201)
-def create_team(team: TeamCreate):
-    new_team = {
-        "id": len(teams) + 1,
-        "name": team.name,
-        "code": team.code
-    }
-
-    teams.append(new_team)
+def create_team(team: TeamCreate, db: DatabaseSession):
+    new_team = Team(name=team.name, code=team.code)
+    db.add(new_team)
+    db.commit()
+    db.refresh(new_team)
     return new_team
 
-@app.post("/events", status_code=201)
-def create_event(event: EventCreate):
-    new_event = {
-        "id": len(events)+1,
-        "home_team_id": event.home_team_id,
-        "away_team_id": event.away_team_id,
-        "starts_at": event.starts_at,
-        "status": event.status     
-    }
 
-    events.append(new_event)
+@app.post("/events", status_code=201)
+def create_event(event: EventCreate, db: DatabaseSession):
+    new_event = Event(
+        home_team_id=event.home_team_id,
+        away_team_id=event.away_team_id,
+        starts_at=event.starts_at,
+        status=event.status,
+    )
+    db.add(new_event)
+    db.commit()
+    db.refresh(new_event)
     return new_event
 
-@app.get("/events") # get all events
-def get_events():
-    return events
+
+@app.get("/events")
+def get_events(db: DatabaseSession):
+    return db.scalars(select(Event)).all()
+
 
 @app.get("/events/{event_id}")
-def get_event(event_id: int):
-    for event in events:
-        if event["id"] == event_id:
-            return event
+def get_event(event_id: int, db: DatabaseSession):
+    event = db.get(Event, event_id)
 
-    raise HTTPException(status_code=404, detail="Event not found")
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    return event
+
 
 @app.put("/events/{event_id}")
-def update_event(event_id: int, updated_event: EventCreate):
-    for event in events:
-        if event["id"] == event_id:
-            event["home_team_id"] = updated_event.home_team_id,
-            event["away_team_id"] = updated_event.away_team_id,
-            event["starts_at"] = updated_event.starts_at,
-            event["status"] = updated_event.status
+def update_event(event_id: int, updated_event: EventCreate, db: DatabaseSession):
+    event = db.get(Event, event_id)
 
-            return event
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
 
-    raise HTTPException(status_code=404, detail="Event not found")
+    event.home_team_id = updated_event.home_team_id
+    event.away_team_id = updated_event.away_team_id
+    event.starts_at = updated_event.starts_at
+    event.status = updated_event.status
+    db.commit()
+    db.refresh(event)
+    return event
+
 
 @app.post("/users", status_code=201)
-def create_user(user: UserCreate):
-    new_user = {
-        "id": len(users) + 1,
-        "display_name": user.display_name,
-        "email": user.email
-    }
-
-    users.append(new_user)
+def create_user(user: UserCreate, db: DatabaseSession):
+    new_user = User(display_name=user.display_name, email=user.email)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
     return new_user
 
+
 @app.get("/users")
-def get_users():
-    return users
+def get_users(db: DatabaseSession):
+    return db.scalars(select(User)).all()
+
 
 @app.get("/users/{user_id}")
-def get_user(user_id: int):
-    for user in users:
-        if user["id"] == user_id:
-            return user
-        
-    raise HTTPException(status_code=404, detail="user not found")
+def get_user(user_id: int, db: DatabaseSession):
+    user = db.get(User, user_id)
 
-@app.post("/tips", status_code=201)
-def create_tips(tip: TipCreate):
-    new_tip = {
-    "id": len(tips) + 1,
-    "user_id": tip.user_id,
-    "event_id": tip.event_id,
-    "predicted_winner_team_id": tip.predicted_winner_team_id
-    }
-
-    users.append(new_tip)
-    return new_tip
-
-@app.get("/tips/{tip_id}")
-def get_tip(tip_id: int):
-    for tip in tips:
-        if tip["id"] == tip_id:
-            return tip
-
-    raise HTTPException(status_code=404, detail="Tip not found")
-
-@app.get("/users/{user_id}/tips")
-def get_user_tips(user_id: int):
-    user_exists = False
-
-    for user in users:
-        if user["id"] == user_id:
-            user_exists = True
-            break
-
-    if not user_exists:
+    if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user_tips = []
+    return user
 
-    for tip in tips:
-        if tip["user_id"] == user_id:
-            user_tips.append(tip)
 
-    return user_tips
+@app.post("/tips", status_code=201)
+def create_tip(
+    tip: TipCreate,
+    db: DatabaseSession,
+    collection: ActivityCollection,
+):
+    new_tip = Tip(
+        user_id=tip.user_id,
+        event_id=tip.event_id,
+        predicted_winner_team_id=tip.predicted_winner_team_id,
+    )
+    db.add(new_tip)
+    db.commit()
+    db.refresh(new_tip)
+
+    collection.insert_one(
+        {
+            "event_type": "tip.created",
+            "user_id": new_tip.user_id,
+            "tip_id": new_tip.id,
+            "event_id": new_tip.event_id,
+            "metadata": {"source": "api"},
+            "created_at": datetime.now(timezone.utc),
+        }
+    )
+    return new_tip
+
+
+@app.get("/tips/{tip_id}")
+def get_tip(tip_id: int, db: DatabaseSession):
+    tip = db.get(Tip, tip_id)
+
+    if tip is None:
+        raise HTTPException(status_code=404, detail="Tip not found")
+
+    return tip
+
+
+@app.get("/users/{user_id}/tips")
+def get_user_tips(user_id: int, db: DatabaseSession):
+    if db.get(User, user_id) is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return db.scalars(select(Tip).where(Tip.user_id == user_id)).all()
+
+
+@app.get("/activity-events")
+def get_activity_events(
+    collection: ActivityCollection,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    documents = collection.find().sort("_id", -1).limit(limit)
+    results = []
+
+    for document in documents:
+        serialized = dict(document)
+        serialized["id"] = str(serialized.pop("_id"))
+        results.append(serialized)
+
+    return results
