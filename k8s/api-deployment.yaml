@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: msb-api
+  namespace: msb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: msb-api
+  template:
+    metadata:
+      labels:
+        app: msb-api
+    spec:
+      containers:
+        - name: api
+          image: docker.io/library/msb-api:day4
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8000
