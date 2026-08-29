@@ -30,7 +30,16 @@ It does not implement real-money gambling, payments, or odds.
 - Isolated tests that do not use the development databases
 - Manual SQL and JOIN exercises
 
-Day 3 (Docker and Docker Compose) is the next stage.
+### Day 3 — Docker and Docker Compose: complete
+
+- API packaged in a Python 3.14 Docker image
+- Docker build context kept small with `.dockerignore`
+- Compose stack for API, PostgreSQL, MongoDB, and one-off database setup
+- Service-name networking through `postgres` and `mongo`
+- Named volumes for PostgreSQL and MongoDB persistence
+- Health checks for API, PostgreSQL, and MongoDB
+- Verified PostgreSQL persistence after PostgreSQL container recreation
+- Diagnosed an invalid database hostname and incorrect API port mapping
 
 ## Current Architecture
 
@@ -60,6 +69,7 @@ than duplicating the relational data.
 - SQLAlchemy and Psycopg
 - MongoDB and PyMongo
 - Pytest, HTTPX, and SQLite for isolated tests
+- Docker and Docker Compose
 - Git
 
 ## Project Structure
@@ -79,6 +89,9 @@ MSB-backend-lab/
 ├── sql/
 │   └── day2_queries.sql   # Manual SQL and JOIN practice
 ├── .env.example
+├── .dockerignore
+├── compose.yaml
+├── Dockerfile
 ├── requirements.txt
 └── README.md
 ```
@@ -147,6 +160,54 @@ Open:
 - API: `http://127.0.0.1:8000`
 - Swagger: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
+
+## Docker Compose (Ubuntu)
+
+Day 3 runs the full local stack on the Ubuntu development host. Docker Engine
+and the Docker Compose plugin must be installed there before running these
+commands.
+
+Start the full stack:
+
+```bash
+docker compose up --build -d
+docker compose ps
+curl -i http://localhost:8000/health
+```
+
+The stack starts four services:
+
+- `postgres`: transactional PostgreSQL database
+- `mongo`: activity/audit document database
+- `init-db`: one-off PostgreSQL table-initialization container
+- `api`: FastAPI application exposed on Ubuntu port 8000
+
+Compose gives services a shared private network. The API uses `postgres` and
+`mongo` as hostnames rather than `localhost`, because `localhost` inside a
+container means that container itself.
+
+The API image is built from `Dockerfile`. It uses a Python base image, installs
+the dependencies before copying source code to make use of Docker's build
+cache, and starts Uvicorn on `0.0.0.0:8000`. `.dockerignore` excludes local
+virtual environments, Git metadata, caches, and `.env` files from the build
+context.
+
+### Data persistence
+
+PostgreSQL data is stored in the named `postgres_data` volume. Recreating the
+PostgreSQL container without deleting that volume preserved the teams and tip
+created through the API. MongoDB data is stored separately in `mongo_data`.
+
+Do not run `docker compose down -v` unless you intentionally want to remove
+both named volumes and all containerized database data.
+
+### Troubleshooting completed
+
+- Using `wrong-postgres` as the database hostname produced a DNS-resolution
+  error, confirming that Compose service names are part of container networking.
+- Mapping host port `8001` to unused container port `9999` produced a
+  connection reset. Uvicorn listens on container port `8000`, so the correct
+  mapping is `8000:8000`.
 
 ## API Endpoints
 
@@ -261,9 +322,9 @@ Before moving on, be able to explain:
 
 ## Next Stage
 
-Day 3 will package the API and its dependencies with Docker and Docker Compose,
-including service-name networking, environment variables, persistent volumes,
-and health checks.
+Day 4 will deploy the API to Kubernetes/K3s, starting with a Deployment,
+ClusterIP Service, and Traefik Ingress before introducing replicas,
+ConfigMaps, and Secrets.
 
 This project represents hands-on educational experience, not commercial or
 production experience.
